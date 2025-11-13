@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Cashup Pro</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Poppins', sans-serif; background: linear-gradient(135deg, #1a1a2e, #16213e); color: #fff; }
+    .card { background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border-radius: 16px; }
+    .btn-gold { background: linear-gradient(45deg, #f59e0b, #fbbf24); }
+    .btn-gold:hover { background: linear-gradient(45deg, #d97706, #f59e0b); }
+    .logo { font-weight: 700; font-size: 1.8rem; }
+    .stream-card { transition: all 0.3s; }
+    .stream-card:hover { transform: translateY(-4px); box-shadow: 0 10px 20px rgba(251,191,36,0.2); }
+  </style>
+</head>
+<body class="min-h-screen p-4">
+  <!-- Header -->
+  <div class="max-w-4xl mx-auto text-center mb-8">
+    <h1 class="logo text-4xl text-yellow-400 mb-2">Cashup Pro</h1>
+    <p class="text-gray-300">End-of-day cash reconciliation • SARS-ready • Multi-till</p>
+  </div>
+  <!-- Company Setup (First Time) -->
+  <div id="setup-screen" class="max-w-md mx-auto card p-6 mb-8 hidden">
+    <h2 class="text-xl font-bold mb-4">Business Setup</h2>
+    <input id="company-name" placeholder="Company Name" class="w-full p-3 mb-3 rounded bg-white bg-opacity-20 text-white placeholder-gray-300">
+    <input id="vat-number" placeholder="VAT Number (e.g. 1234567890)" class="w-full p-3 mb-3 rounded bg-white bg-opacity-20 text-white placeholder-gray-300">
+    <input id="address" placeholder="Physical Address" class="w-full p-3 mb-3 rounded bg-white bg-opacity-20 text-white placeholder-gray-300">
+    <button onclick="saveCompany()" class="w-full btn-gold text-black font-bold py-3 rounded">Save & Start</button>
+  </div>
+  <!-- Main App -->
+  <div id="main-app" class="max-w-4xl mx-auto hidden">
+    <!-- Add Stream -->
+    <div class="card p-6 mb-6">
+      <div class="flex gap-3 flex-wrap">
+        <input id="stream-name" placeholder="e.g. V-Slot Reception" class="flex-1 p-3 rounded bg-white bg-opacity-20 text-white placeholder-gray-300">
+        <button onclick="addStream()" class="btn-gold px-6 py-3 rounded font-bold">+ Add Income Stream</button>
+      </div>
+    </div>
+    <!-- Income Streams -->
+    <div id="streams-container" class="space-y-4 mb-8"></div>
+    <!-- Actions -->
+    <div class="flex gap-4 justify-center mb-8">
+      <button onclick="generateReport()" class="bg-emerald-600 hover:bg-emerald-700 px-8 py-3 rounded font-bold">Generate Report</button>
+      <button onclick="exportSARS()" class="bg-amber-600 hover:bg-amber-700 px-8 py-3 rounded font-bold">Export for SARS (PDF)</button>
+    </div>
+    <!-- Report -->
+    <div id="report" class="card p-6 hidden"></div>
+  </div>
+  <!-- Footer -->
+  <div class="text-center text-gray-400 text-sm mt-12">
+    Powered by Firebase • Built for South African businesses
+  </div>
+  <!-- Firebase SDKs -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, doc, setDoc, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    const firebaseConfig = {
+      apiKey: "AIzaSyD8jTNHA74nyqoDGZb33xJYVSE86YP95yc",
+      authDomain: "cash-up-pro.firebaseapp.com",
+      projectId: "cash-up-pro",
+      storageBucket: "cash-up-pro.firebasestorage.app",
+      messagingSenderId: "754409649524",
+      appId: "1:754409649524:web:11b80d491c39ef7d502821",
+      measurementId: "G-CD80V1CMV8"
+    };
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    let company = {};
+    let streams = [];
+    // Load company & streams
+    async function loadData() {
+      const companyDoc = await getDoc(doc(db, "settings", "company"));
+      if (companyDoc.exists()) {
+        company = companyDoc.data();
+        document.getElementById("setup-screen").classList.add("hidden");
+        document.getElementById("main-app").classList.remove("hidden");
+        loadStreams();
+      } else {
+        document.getElementById("setup-screen").classList.remove("hidden");
+      }
+    }
+    window.saveCompany = async () => {
+      company = {
+        name: document.getElementById("company-name").value,
+        vat: document.getElementById("vat-number").value,
+        address: document.getElementById("address").value
+      };
+      await setDoc(doc(db, "settings", "company"), company);
+      document.getElementById("setup-screen").classList.add("hidden");
+      document.getElementById("main-app").classList.remove("hidden");
+    };
+    async function loadStreams() {
+      const snapshot = await getDocs(collection(db, "streams"));
+      streams = [];
+      const container = document.getElementById("streams-container");
+      container.innerHTML = "";
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        streams.push({ id: doc.id, ...data });
+        renderStream(data, doc.id);
+      });
+    }
+    window.addStream = async () => {
+      const name = document.getElementById("stream-name").value.trim();
+      if (!name) return alert("Enter a stream name");
+      const id = Date.now().toString();
+      const stream = { name, report: 0, physical: 0, withdrawals: 0, remaining: 0 };
+      await setDoc(doc(db, "streams", id), stream);
+      document.getElementById("stream-name").value = "";
+      loadStreams();
+    };
+    function renderStream(stream, id) {
+      const div = document.createElement("div");
+      div.className = "stream-card card p-5";
+      div.innerHTML = `
+        <h3 class="font-bold text-yellow-400 mb-3">${stream.name}</h3>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <input type="number" placeholder="Machine Report (R)" value="${stream.report}" onchange="updateField('${id}', 'report', this.value)" class="p-2 rounded bg-white bg-opacity-20 text-white">
+          <input type="number" placeholder="Physical Payout (R)" value="${stream.physical}" onchange="updateField('${id}', 'physical', this.value)" class="p-2 rounded bg-white bg-opacity-20 text-white">
+          <input type="number" placeholder="Withdrawals (R)" value="${stream.withdrawals}" onchange="updateField('${id}', 'withdrawals', this.value)" class="p-2 rounded bg-white bg-opacity-20 text-white">
+          <input type="number" placeholder="Remaining Payout (R)" value="${stream.remaining}" onchange="updateField('${id}', 'remaining', this.value)" class="p-2 rounded bg-white bg-opacity-20 text-white">
+        </div>
+      `;
+      document.getElementById("streams-container").appendChild(div);
+    }
+    window.updateField = async (id, field, value) => {
+      await setDoc(doc(db, "streams", id), { [field]: parseFloat(value) || 0 }, { merge: true });
+    };
+    window.generateReport = async () => {
+      const snapshot = await getDocs(collection(db, "streams"));
+      let totalFound = 0;
+      let totalReport = 0;
+      let report = `<h2 class="text-2xl font-bold mb-4 text-yellow-400">Cashup Report - ${new Date().toLocaleDateString('en-ZA')}</h2>`;
+      report += `<p><strong>${company.name}</strong><br>VAT: ${company.vat}<br>${company.address}</p><hr class="my-4 border-gray-600">`;
+      snapshot.forEach(doc => {
+        const s = doc.data();
+        const found = s.physical + s.remaining - s.withdrawals;
+        totalFound += found;
+        totalReport += s.report;
+        report += `
+          <div class="mb-4 p-3 bg-white bg-opacity-10 rounded">
+            <strong>${s.name}</strong><br>
+            Report: R${s.report.toFixed(2)} | Found: R${found.toFixed(2)} |
+            Discrepancy: R${(s.report - found).toFixed(2)}
+          </div>`;
+      });
+      report += `<div class="mt-6 text-lg font-bold">
+        Total Expected: R${totalReport.toFixed(2)} |
+        Total Found: R${totalFound.toFixed(2)} |
+        Short/Overs: R${(totalReport - totalFound).toFixed(2)}
+      </div>`;
+      document.getElementById("report").innerHTML = report;
+      document.getElementById("report").classList.remove("hidden");
+    };
+    window.exportSARS = () => {
+      generateReport();
+      setTimeout(() => {
+        window.print();
+      }, 500);
+    };
+    // Start
+    loadData();
+  </script>
+</body>
+</html>
